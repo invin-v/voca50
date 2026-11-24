@@ -302,7 +302,7 @@ document.querySelectorAll('.sw').forEach(b=>b.onclick=()=>{
   if(!pen)setPen(true);
 });
 document.querySelectorAll('.sw').forEach(x=>x.setAttribute('aria-pressed',x.dataset.c===color));
-$('#test').checked=store.get('test',false);
+$('#test').checked=store.get('test',true);
 function setTest(v){document.body.classList.toggle('test',v);store.set('test',v);document.querySelectorAll('.mean.shown').forEach(x=>x.classList.remove('shown'))}
 $('#test').onchange=e=>setTest(e.target.checked);
 $('#allko').onclick=()=>{
