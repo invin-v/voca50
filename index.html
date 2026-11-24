@@ -81,6 +81,8 @@ body.test .mean:not(.shown)::before{content:"터치해서 뜻 보기";background
 mark{color:inherit;border-radius:3px;padding:1px 0}
 mark.y{background:var(--hy)}mark.p{background:var(--hp)}mark.g{background:var(--hg)}
 body.pen .hl{cursor:text}
+body.pen #list{touch-action:pan-y} /* 가로로 문지르는 손짓을 형광펜이 받도록 (글자 span 에는 touch-action 이 적용되지 않음) */
+@media (pointer:coarse){body.pen .hl{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}}
 body.pen mark{cursor:pointer}
 .nav{display:flex;justify-content:space-between;gap:12px;padding:22px 0}
 .nav button{border:1px solid var(--rule);background:var(--chip);border-radius:10px;padding:10px 18px;font-size:15px}
@@ -170,8 +172,9 @@ let pen=false, color=store.get('color','y'), allKo=false, lastHL=0, touch=false;
 
 function h(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
 function hl(text,key,cls){const s=h('span','hl'+(cls?' '+cls:''));s.dataset.k=key;s.dataset.t=text;paint(s);return s}
-function paint(el){
-  const t=el.dataset.t, rs=(HL[el.dataset.k]||[]).slice().sort((a,b)=>a[0]-b[0]);
+function paint(el,tmp){
+  const base=HL[el.dataset.k]||[];
+  const t=el.dataset.t, rs=(tmp?mergeR(base,tmp[0],tmp[1],tmp[2]):base).slice().sort((a,b)=>a[0]-b[0]);
   el.textContent='';let p=0;
   rs.forEach((r,i)=>{
     const s=Math.max(p,Math.min(r[0],t.length)), e=Math.min(r[1],t.length);
@@ -181,16 +184,17 @@ function paint(el){
   });
   if(p<t.length)el.append(t.slice(p));
 }
-function addRange(key,s,e,c){
+function addRange(key,s,e,c){HL[key]=mergeR(HL[key]||[],s,e,c)}
+function mergeR(list,s,e,c){
   let out=[];
-  (HL[key]||[]).forEach(r=>{
+  list.forEach(r=>{
     if(r[1]<=s||r[0]>=e){out.push(r);return}
     if(r[0]<s)out.push([r[0],s,r[2]]);
     if(r[1]>e)out.push([e,r[1],r[2]]);
   });
   out.push([s,e,c]);out.sort((a,b)=>a[0]-b[0]);
-  const mg=[];out.forEach(r=>{const l=mg[mg.length-1];if(l&&l[1]===r[0]&&l[2]===r[2])l[1]=r[1];else mg.push(r)});
-  HL[key]=mg;
+  const mg=[];out.forEach(r=>{const l=mg[mg.length-1];if(l&&l[1]===r[0]&&l[2]===r[2])l[1]=r[1];else mg.push(r.slice())});
+  return mg;
 }
 function spkBtn(text,sm){
   const b=h('button','spk'+(sm?' sm':''));b.innerHTML=SPK;b.setAttribute('aria-label','발음 듣기');b.dataset.say=text;return b;
@@ -275,10 +279,57 @@ function applyPen(){
   sel.removeAllRanges();
   if(n){store.set('hl',HL);lastHL=Date.now();document.querySelectorAll('#list .hl').forEach(el=>{if(HL[el.dataset.k])paint(el)})}
 }
-let selT=0;
 document.addEventListener('pointerdown',e=>{touch=e.pointerType!=='mouse'});
 document.addEventListener('mouseup',()=>{if(pen&&!touch)setTimeout(applyPen,0)});
-document.addEventListener('selectionchange',()=>{if(!pen||!touch)return;clearTimeout(selT);selT=setTimeout(applyPen,900)});
+/* 터치: 형광펜을 켜고 글자 위를 손가락으로 옆으로 문지르면 칠해진다 (위아래로 밀면 평소처럼 스크롤) */
+function offAt(el,x,y){
+  let best=null,bd=1e9;
+  for(const r of el.getClientRects()){const d=y<r.top?r.top-y:y>r.bottom?y-r.bottom:0;if(d<bd){bd=d;best=r}}
+  if(!best)return null;
+  /* 형광펜이 칠해진 줄은 상자가 여러 조각으로 나뉘므로 같은 줄의 조각을 하나로 합친다 */
+  let L=best.left,R=best.right,T=best.top,B=best.bottom;
+  for(const r of el.getClientRects()){const m=(r.top+r.bottom)/2;if(m>=best.top-2&&m<=best.bottom+2){L=Math.min(L,r.left);R=Math.max(R,r.right);T=Math.min(T,r.top);B=Math.max(B,r.bottom)}}
+  best={left:L,right:R,top:T,bottom:B};
+  x=Math.min(Math.max(x,L+1),R-1);
+  /* 그 줄에서 손가락 위치에 해당하는 글자 번호를 글자 상자 좌표로 직접 찾는다 */
+  const tw=document.createTreeWalker(el,NodeFilter.SHOW_TEXT),rg=document.createRange();
+  let g=0,last=null,n;
+  while((n=tw.nextNode())){
+    const len=n.nodeValue.length;
+    for(let i=0;i<len;i++,g++){
+      rg.setStart(n,i);rg.setEnd(n,i+1);
+      const c=rg.getClientRects()[0];if(!c||!c.width)continue;
+      const m=(c.top+c.bottom)/2;if(m<best.top||m>best.bottom)continue;
+      if(x<c.left+c.width/2)return g;
+      last=g+1;
+    }
+  }
+  return last;
+}
+let drag=null;
+document.addEventListener('pointerdown',e=>{
+  if(!pen||e.pointerType==='mouse')return;
+  const el=e.target.closest&&e.target.closest('#list .hl');if(!el)return;
+  const a=offAt(el,e.clientX,e.clientY);if(a==null)return;
+  drag={el:el,a:a,b:a,x:e.clientX,y:e.clientY,moved:false,id:e.pointerId};
+  try{el.setPointerCapture(e.pointerId)}catch(_){}
+});
+document.addEventListener('pointermove',e=>{
+  if(!drag||e.pointerId!==drag.id)return;
+  if(!drag.moved&&Math.hypot(e.clientX-drag.x,e.clientY-drag.y)<8)return;
+  drag.moved=true;
+  const b=offAt(drag.el,e.clientX,e.clientY);if(b!=null)drag.b=b;
+  const s=Math.min(drag.a,drag.b),t=Math.max(drag.a,drag.b);
+  paint(drag.el,t>s?[s,t,color]:null);
+});
+function endDrag(e,commit){
+  if(!drag||e.pointerId!==drag.id)return;const d=drag;drag=null;
+  const s=Math.min(d.a,d.b),t=Math.max(d.a,d.b);
+  if(commit&&d.moved&&t>s){addRange(d.el.dataset.k,s,t,color);store.set('hl',HL)}
+  if(d.moved){lastHL=Date.now();paint(d.el)}
+}
+document.addEventListener('pointerup',e=>endDrag(e,true));
+document.addEventListener('pointercancel',e=>endDrag(e,false));
 
 document.addEventListener('click',e=>{
   const t=e.target;
@@ -303,7 +354,7 @@ document.addEventListener('click',e=>{
 });
 function setPen(v){
   pen=v;document.body.classList.toggle('pen',v);$('#pen').setAttribute('aria-pressed',v);
-  $('#hint').textContent=v?'형광펜 켜짐 — 글자를 드래그(휴대폰은 길게 눌러 선택)하면 줄이 그어지고 자동 저장됩니다. 그어진 줄을 누르면 지워집니다.':'한글 해석은 가려져 있습니다. 누르면 보이고, 다시 누르면 가려집니다.';
+  $('#hint').textContent=v?'형광펜 켜짐 — 글자 위를 드래그(휴대폰은 손가락으로 옆으로 문지르기)하면 줄이 그어지고 자동 저장됩니다. 그어진 줄을 누르면 지워집니다.':'한글 해석은 가려져 있습니다. 누르면 보이고, 다시 누르면 가려집니다.';
 }
 $('#pen').onclick=()=>setPen(!pen);
 document.querySelectorAll('.sw').forEach(b=>b.onclick=()=>{
