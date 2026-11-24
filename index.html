@@ -194,7 +194,7 @@ function render(){
     const card=h('article','card');card.append(h('div','num',String(i+1).padStart(2,'0')));
     const body=h('div','body'), top=h('div','top'), head=h('div','head');
     head.append(hl(w,w+'|w','word'),h('span','ipa','('+ipa+')'));
-    if(canSpeak)head.append(spkBtn(w));
+    head.append(spkBtn(w));
     head.append(h('span','lv',LVN[lv]||''));
     const kb=h('button','kn','외움');kb.dataset.w=w;kb.setAttribute('aria-pressed',!!KN[w]);head.append(kb);
     if(KN[w])card.classList.add('known');
@@ -204,7 +204,7 @@ function render(){
     const exs=h('div','exs');
     ex.forEach((x,j)=>{
       const row=h('div','ex'), box=h('div'), en=h('div','en'), ko=h('div','ko'+(allKo?'':' hid'));
-      en.append(hl(x[0],w+'|e'+j));if(canSpeak)en.append(spkBtn(x[0],true));
+      en.append(hl(x[0],w+'|e'+j));en.append(spkBtn(x[0],true));
       ko.append(hl(x[1],w+'|k'+j));
       box.append(en,ko);row.append(h('span','cn',CN[j]),box);exs.append(row);
     });
@@ -244,8 +244,9 @@ function toast(m){let e=$('#toast');if(!e){e=h('div');e.id='toast';e.style.cssTe
 function say(t){
   const rate=t.indexOf(' ')<0?0.85:0.92;
   if(NTTS){NTTS.stop().catch(()=>{}).then(()=>NTTS.speak({text:t,lang:'en-US',rate:rate,pitch:1,volume:1})).catch(()=>toast('이 기기에 영어 음성이 없어 발음을 들을 수 없습니다'));return}
-  if(!WEBTTS)return;speechSynthesis.cancel();
-  const u=new SpeechSynthesisUtterance(t);u.lang='en-US';if(voice)u.voice=voice;u.rate=t.indexOf(' ')<0?0.85:0.92;speechSynthesis.speak(u);
+  if(!WEBTTS){toast('이 브라우저는 발음 기능을 지원하지 않습니다. Chrome이나 Safari로 열어 주세요.');return}
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(t);u.lang='en-US';if(voice)u.voice=voice;u.rate=t.indexOf(' ')<0?0.85:0.92;u.onerror=e=>{if(e.error!=='interrupted'&&e.error!=='canceled')toast('발음을 재생하지 못했습니다. 기기에 영어 음성이 있는지 확인해 주세요.')};speechSynthesis.speak(u);
 }
 
 /* 형광펜 */
